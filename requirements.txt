@@ -1,0 +1,13 @@
+pyyaml
+numpy
+tables
+pandas
+pylint
+progressbar
+ipdb
+scipy
+scikit-learn
+six
+gensim
+jieba
+opencc
