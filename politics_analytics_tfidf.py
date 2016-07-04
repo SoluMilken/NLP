@@ -3,6 +3,7 @@ import json
 import jieba
 import ipdb
 import numpy as np
+#import itertool
 #from nlp.utils import IterTimer
 
 
@@ -41,25 +42,29 @@ with open(topic_output_path) as json_file:
             dataset[num] = [comment_cut_list, label]
         corpus.append(paragraph)
 
+# filename = topic + 'comment_corpus'
+# with open(filename, ):
+
+
 #with IterTimer('TFIDF'):
 from sklearn import feature_extraction
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 vectorizer = TfidfVectorizer()
 tfidf = vectorizer.fit_transform(corpus)
-print(tfidf.shape)
-
-words = vectorizer.get_feature_names()
+index = vectorizer.vocabulary_
+idf = vectorizer.idf_
+vocab = list(map(lambda k: (k, index[k], idf[index[k]]), index))
+vocab.sort(key=lambda x: x[2])
+feature_index = [v[1] for v in vocab[:200]]
+tfidf = tfidf[:, feature_index]
+#words = vectorizer.get_feature_names()
 
 # for i in range(len(corpus)):
 #     print('----Document %d----' % (i))
 #     for j in range(len(words)):
-#         if tfidf[i, j] > 0.1:
+#         if tfidf[i, j] > 0.2:
 #             print(words[j], tfidf[i, j])
-
-
-
-
 
 ## training
 dataset = np.array(dataset)
@@ -75,35 +80,37 @@ def evaluator(predicted_label, true_label):
     diff = predicted_label - true_label
     accuracy = len(diff[diff == 0]) / float(len(true_label))
     bias = len(predicted_label[predicted_label == 3]) / float(len(predicted_label))
+    #logloss = 
     return accuracy, bias
 
 from sklearn.linear_model import LogisticRegression
 from collections import Counter
 weight = Counter(label)
 for cat in list(weight.keys()):
-    weight[cat] = 10.0 / weight[cat]
-model = LogisticRegression(C=15, multi_class='ovr', n_jobs=1, class_weight=weight)
+    weight[cat] = int(1000.0 / weight[cat])
 
-from sklearn.cross_validation import KFold
-kf = KFold(len(label), n_folds=5, shuffle=True)
+from sklearn.cross_validation import StratifiedKFold
+kf = StratifiedKFold(label, n_folds=5, shuffle=True, random_state=1233)
+
+from sklearn.dummy import DummyClassifier
 
 from sklearn.metrics import log_loss
 
 for train_index, test_index in kf:
-    model.fit(tfidf[train_index, :], label[train_index])
-    predicted_train_label = model.predict(tfidf[train_index, :])
-    accuracy, bias = evaluator(predicted_train_label, label[train_index])
-    print("train accuracy = {:f}, biased value = {:f}".format(accuracy, bias))
+    for index, state in zip([train_index, test_index], ['train', 'test']):
+        dummy_model = DummyClassifier(strategy='most_frequent')
+        dummy_model.fit(tfidf[index, :], label[index])
+        dummy_predicted_label = dummy_model.predict_proba(tfidf[index, :])
+        dummy_mean_accuracy = dummy_model.score(tfidf[index, :], label[index])
+        #dummy_log_loss = log_loss(label[index], dummy_predicted_label, eps=1e-15, normalize=True)
 
-    # log_loss = log_loss(label[train_index], predicted_train_label, eps=1e-15, normalize=True, sample_weight=None)
-    # print("train logloss = %f" % log_loss)
+        model = LogisticRegression(C=1e+5, multi_class='ovr', n_jobs=1, class_weight='balanced')
+        model.fit(tfidf[index, :], label[index])
+        predicted_label = model.predict_proba(tfidf[index, :])
+        mean_accuracy = model.score(tfidf[index, :], label[index])
 
-    predicted_test_label = model.predict(tfidf[test_index, :])
-    accuracy, bias = evaluator(predicted_test_label, label[test_index])
-    print("test  accuracy = {:f}, biased value = {:f}".format(accuracy, bias))
+        print(state + " accuracy = {:f}, dummy accuracy = {:f}".format(mean_accuracy, dummy_mean_accuracy))
 
-    # log_loss = log_loss(label[test_index], predicted_test_label, eps=1e-15, normalize=True, sample_weight=None)
-    # print("test logloss = %f" % log_loss)
-
-
-ipdb.set_trace()
+        #log_loss = log_loss(label[index], predicted_label, eps=1e-15, normalize=True)
+        #print(state + " logloss = {:f}, dummy logloss = {:f}".format(log_loss, dummy_log_loss))
+        
